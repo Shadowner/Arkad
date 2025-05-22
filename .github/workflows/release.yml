@@ -1,0 +1,51 @@
+name: Release Build
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.head_commit.message, 'MAJOR') ||startsWith(github.event.head_commit.message, 'MINOR') || startsWith(github.event.head_commit.message, 'PATCH')
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      commit_title: ${{ steps.get-commit-title.outputs.commit_title }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get version from Cargo.toml
+        id: get-version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get commit Title without MAJOR/MINOR/PATCH
+        id: get-commit-title
+        run: |
+          COMMIT_TITLE=$(git log -1 --pretty=%B | head -n 1 | sed -E 's/^(MAJOR|MINOR|PATCH)[[:space:]]*:[[:space:]]*//') 
+          echo "commit_title=${COMMIT_TITLE}" >> $GITHUB_OUTPUT
+          
+      - name: Create tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag "v${{ steps.get-version.outputs.version }}"
+          git push origin "v${{ steps.get-version.outputs.version }}"
+
+  crate-publish:
+    continue-on-error: true
+    needs: check-release
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v4
+          with:
+            ref: v${{ needs.check-release.outputs.version}}
+          
+        - name: Install Rust
+          uses: dtolnay/rust-toolchain@stable
+          
+        - name: Publish to crates.io
+          env:
+            CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          run: cargo publish -p infrarust
